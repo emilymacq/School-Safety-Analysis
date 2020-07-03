@@ -1,0 +1,232 @@
+---
+title: "Stats 485 Unit 3 Appendix"
+author: "Emily MacQuarrie"
+date: "4/26/2019"
+output: html_document
+---
+
+#Load Libraries
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lme4)
+# suppress warnings
+options(warn=-1)
+```
+
+# Load Data
+```{r}
+set.seed(485)
+security_wide <- read.csv('http://dept.stat.lsa.umich.edu/~bbh/s485/data/security_wide.csv')
+nschools <-nlevels(security_wide$school)
+# Create dataframe for analysis
+fs_items <- c(paste0('q38',c('c', 'd', 'h', 'g','n')), 'q40a', 'q38f')
+security_wide_fs <- security_wide[c('school', fs_items)]
+```
+
+Analyze Complete Cases
+```{r}
+# number of no's and yes's from schools
+security_wide_fs %>% complete.cases() %>% table()
+security_wide %>% dplyr::select(q38c, q38d, q38h, q38g, q38n, q40a, q38f) %>% sapply(function(vec)table(vec, exclude=NULL)) %>% knitr::kable()
+# set index for schools based on number of yes responses
+sum_index <- security_wide_fs %>% na.omit() %>% dplyr::select(-school) %>% rowSums()
+table(sum_index)
+```
+
+Format Dataframe
+```{r}
+security_tall_fs0 <-security_wide_fs %>% na.omit() %>% tidyr::gather("item", "response",-school)
+head(security_tall_fs0, 3)
+```
+
+# Rasch Model
+```{r}
+# binomial logistic rasch model
+rasch0 <-glm(response~item+school -1,family=binomial, data=security_tall_fs0)
+school_coef_names <-paste0("school",levels(security_wide$school))
+# display number of yes's and no's from schools
+table(school_coef_names %in% names(coef(rasch0)) )
+```
+
+Analyze Rasch Indices
+```{r}
+rasch0_index <-c(schoolid1011=0,coef(rasch0)[-(1:7)])
+table(round(rasch0_index))
+hist(round(rasch0_index), main="Histogram of Rasch Model 1", xlab="Security Index of Model 1")
+rank <- sort(rasch0_index, decreasing=TRUE)
+head(rank)
+```
+
+# Rasch Model with Different Survey Questions
+```{r}
+# select questions for analysis
+fs_items_c <- c(paste0('q38',c('a', 'e', 'g','h', 'm')), 'q40c', 'q40d')
+security_wide_fs_c <- security_wide[c('school', fs_items_c)]
+```
+
+Analyze Complete Cases
+```{r}
+security_wide_fs_c %>% complete.cases() %>% table()
+sum_index_c <- security_wide_fs_c%>% na.omit()%>%dplyr::select(-school)%>% rowSums()
+table(sum_index_c)
+```
+
+Format Dataframe
+```{r}
+# reformat dataframe
+security_tall_fs0_c <-security_wide_fs_c%>% na.omit()%>%tidyr::gather("item", "response",-school)
+head(security_tall_fs0_c, 3)
+```
+
+Rasch Model
+```{r}
+rasch0_c <-glm(response~item+school -1,family=binomial, data=security_tall_fs0_c)
+head(coef(rasch0_c), 10)
+```
+
+Analyze Rasch Indices
+```{r}
+# set school security indices from Rasch model with selected subset of questions
+rasch0_index_c <-c(schoolid1011=0,coef(rasch0_c)[-(1:7)])
+table(round(rasch0_index_c))
+# display histogram of security indices
+hist(round(rasch0_index_c), main="Histogram of Rasch Model 2", xlab="Security Index of Model 2")
+```
+
+# Comparison of Models
+```{r}
+# 629 elements in intersection
+common_ids = sort(intersect(names(rasch0_index), names(rasch0_index_c)))
+r0_trunc = rasch0_index[common_ids]
+r1_trunc = rasch0_index_c[common_ids]
+ranks0 = rank(r0_trunc, ties.method = "random")
+ranks1 = rank(r1_trunc, ties.method = "random")
+```
+
+Plot Comparison of Ranks
+```{r}
+# plot school rank from model 1 and model 2
+# each school is a data point
+ggplot(data.frame(cbind(ranks0, ranks1)),aes(ranks0, ranks1)) + 
+  geom_point() + ggtitle("Comparison of Model 1 to Model 2") +
+  xlab('Model 1 Ranks') + ylab('Model 2 Ranks')
+```
+
+Correlation of Model Ranks
+```{r}
+# 1 indicates correlation
+cor(ranks0, ranks1, method ="spearman")
+cor(ranks0, ranks1, method ="kendall")
+```
+
+The two models are closer to no correlation. The FS model is unreliable but valid.
+
+
+# Compare Fixed Effects to Random Effects
+```{r}
+security_tall_fs1 <-security_wide_fs%>%tidyr::gather("item", "response",-school)
+rasch01 <-glm(response~item+school -1,family=binomial, data=security_tall_fs1)
+rasch01_index <- c(schoolid1011=0,coef(rasch01)[-(1:7)])
+
+rasch1 <- glmer(response~item+(1|school),family=binomial, data=security_tall_fs1)
+head(coef(rasch1)$school, 3)
+# security indices are now intercept values
+rasch1_index <-coef(rasch1)$school[,"(Intercept)"]
+sum(security_wide$school != row.names(coef(rasch1)$school))
+plot(rasch01_index, rasch1_index, main = "Comparing Variations of Model 1", xlab="Rasch fixed effects model",ylab="Rasch random effects model")
+
+security_tall_fs1_c <-security_wide_fs_c%>%tidyr::gather("item", "response",-school)
+rasch01_c <-glm(response~item+school -1,family=binomial, data=security_tall_fs1_c)
+rasch01_index_c <- c(schoolid1011=0,coef(rasch01_c)[-(1:7)])
+
+rasch1_c <-glmer(response~item+(1|school),family=binomial, data=security_tall_fs1_c)
+head(coef(rasch1_c)$school, 3)
+rasch1_index_c <-coef(rasch1_c)$school[,"(Intercept)"]
+plot(rasch01_index_c, rasch1_index_c, main = "Comparing Variations of Model 2",xlab="Rasch fixed effects model",ylab="Rasch random effects model")
+```
+
+# Bootstrap for random effects personalized model
+```{r boot-block, cache=2}
+bootreps = 1000
+indices = sample(1:nrow(security_tall_fs1_c), size = 3)
+ids = as.character(security_tall_fs1_c[, "school"][indices])
+# Printing school ids to analyze
+ids
+
+rboot = function(statistic, simulator, B)
+{
+  tboots = replicate(B, statistic(simulator()))
+  if(is.null(dim(tboots))) 
+  {
+    tboots = array(tboots, dim = c(1, B))
+  }
+  return(tboots)
+}
+
+resampler = function()
+{
+  whichrows = sample(1L:nrow(security_tall_fs1_c), nrow(security_tall_fs1_c), replace = T)
+  security_tall_fs1_c[whichrows, ]
+}
+
+coefs = function(bootspl)
+{
+  refitted.mod = update(rasch1_c, data = bootspl)
+  schools = coef(refitted.mod)$school
+  vals = schools[, "(Intercept)"]
+  names(vals) = row.names(schools)
+  unlist(vals)
+}
+boot.stats <- rboot(coefs, resampler, bootreps)
+
+vec1 = numeric(length = bootreps)
+vec2 = numeric(length = bootreps)
+vec3 = numeric(length = bootreps)
+for (i in 1:bootreps)
+{
+  vec1[i] = unlist(boot.stats[i])[ids[1]]
+  vec2[i] = unlist(boot.stats[i])[ids[2]]
+  vec3[i] = unlist(boot.stats[i])[ids[3]]
+}
+vec1 = vec1[!is.na(vec1)]
+vec2 = vec2[!is.na(vec2)]
+vec3 = vec3[!is.na(vec3)]
+
+#Test for normality and variances
+qqnorm(vec1)
+hist(vec1, main = paste("Histogram of School" , ids[1]), xlab = "Predicted Index")
+# Variance of bootstrapped indices
+var(vec1)
+# Calculate sample sd of residuals
+boot_truth <- coef(rasch1_c)$school[ids[1], "(Intercept)"]
+sd_1 <- sd(vec1 - boot_truth)
+sd_1
+
+qqnorm(vec2)
+hist(vec2, main = paste("Histogram of School" , ids[2]), xlab = "Predicted Index")
+# Variance of bootstrapped indices
+var(vec2)
+# Calculate sample sd of residuals
+boot_truth <- coef(rasch1_c)$school[ids[2], "(Intercept)"]
+sd_2 <- sd(vec2 - boot_truth)
+sd_2
+
+qqnorm(vec3)
+hist(vec3, main = paste("Histogram of School" , ids[3]), xlab = "Predicted Index")
+# Variance of bootstrapped indices
+var(vec3)
+# Calculate sample sd of residuals
+boot_truth <- coef(rasch1_c)$school[ids[3], "(Intercept)"]
+sd_3 <- sd(vec3 - boot_truth)
+sd_3
+```
+
+```{r}
+boxplot(c(sd_1, sd_2, sd_3))
+avgsd <- mean(c(sd_1, sd_2, sd_3))
+avgsd
+# difference between average residual sd and residual sd for each school
+c(sd_1, sd_2, sd_3) - avgsd
+```
+
